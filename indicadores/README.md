@@ -1,110 +1,85 @@
 # Velas por Dentro PRO (TradingView)
 
-Basado en el vídeo de *marrow_trading* "Ver un retroceso por dentro": **cada vela te cuenta
-quién mandó dentro de ella**. Cada vela se dibuja hueca (borde azul = alcista, borde rojo = bajista)
-y por dentro se rellena con el **volumen comprador (verde)** y el **volumen vendedor (rojo)**.
+Réplica mejorada del indicador del vídeo de *marrow_trading* "Ver un retroceso por dentro":
+**cada vela te cuenta quién mandó**.
 
 Archivo: [`velas_por_dentro_pro.pine`](velas_por_dentro_pro.pine) (Pine Script v6).
 
-## De dónde sale la información de compradores y vendedores
+## Cómo se ve cada vela
 
-TradingView no da directamente "compras" y "ventas" de cada vela, así que el indicador
-**abre la vela por dentro**: pide las velas de una temporalidad inferior con
-`request.security_lower_tf` (por ejemplo, las 15 velas de 1 minuto que forman una vela de 15m) y:
+```
+      │            ← mecha (color del borde)
+  ┌───┬───┐        ← borde AZUL = la vela subió · borde ROJO = la vela bajó
+  │███│   │
+  │███│███│        barra VERDE (izquierda) = compradores
+  │███│███│        barra ROJA  (derecha)   = vendedores
+  └───┴───┘        la barra MÁS ALTA es el bando que mandó
+      │
+```
 
-- si una vela interna cierra **arriba** de su apertura, su volumen cuenta como **compra**;
-- si cierra **abajo**, cuenta como **venta**;
-- si cierra igual, se compara con el cierre anterior (regla del tick) o se reparte 50/50.
+- **Borde azul + verde más alta** → subió y compraron de verdad. Fuerza alcista.
+- **Borde rojo + roja más alta** → bajó y vendieron de verdad. Fuerza bajista.
+- **Borde rojo + verde más alta** → bajó, pero dentro mandaron los compradores: **retroceso débil** (lo del vídeo).
+  Si el bando contrario gana con claridad (≥ 60 %), el borde se pone **amarillo**.
+- **Borde azul + roja más alta** → subió sin compradores: **subida débil**, cuidado.
 
-Es el mismo método que usa el indicador oficial *Volume Delta* de TradingView. Cuando no hay datos
-internos (velas muy antiguas), se estima por la posición del cierre y el relleno sale **más transparente**.
+## Cómo funciona (importante)
 
-> Diferencia con el vídeo: TradingView no permite dibujar dos barritas una al lado de la otra
-> dentro de una vela. Por eso el reparto se muestra apilado: **verde abajo = % de compradores,
-> rojo arriba = % de vendedores**. Más verde = mandaron los compradores.
+Para que quepan **dos barras dentro de una vela**, cada vela se dibuja con varias velas del gráfico.
+Por eso **el gráfico va en una temporalidad menor** que las velas que quieres ver:
 
-## Instalación (paso a paso)
+| Pon el gráfico en | Verás velas de | Compras/ventas medidas con |
+|---|---|---|
+| 1m | 5m | 1m |
+| 3m | 15m | 1m |
+| 5m | 30m | 1m |
+| **15m** | **1H** | 1m |
+| 30m | 2H | 1m |
+| 1H | 4H | 1m |
+| 4H | Diario | 5m |
+| Diario | Semanal | 15m |
 
-1. En el ordenador, abre el archivo `.pine` en GitHub y copia todo el código (botón de los dos cuadraditos).
-2. En tradingview.com abre un gráfico → pestaña inferior **Editor de Pine**.
-3. Selecciona todo (Ctrl+A), bórralo y pega el código (Ctrl+V).
-4. **Guardar** → **Añadir al gráfico**.
-5. **Oculta las velas normales** para que no se tapen: clic en el engranaje del gráfico
-   (**Configuración**) → pestaña **Símbolo** → desmarca **Cuerpo**, **Bordes** y **Mecha** → Aceptar.
-6. En el móvil lo encontrarás en **Indicadores → Mis scripts**.
+(Puedes elegir otra combinación con *Temporalidad de las velas → Manual*.)
 
-## Cómo leerlo
+Compras y ventas: el indicador abre cada vela con `request.security_lower_tf`; el volumen de las
+velas internas que cierran arriba cuenta como compra y el de las que cierran abajo, como venta
+(mismo método que el *Volume Delta* oficial de TradingView). En velas muy antiguas sin datos internos
+se estima y las barras salen más transparentes.
 
-### Modo de relleno (ajuste "Modo de relleno")
+## Instalación
 
-- **Color dominante** (por defecto): toda la vela se pinta del color del bando que ganó.
-  Verde fuerte = muchos más compradores; verde clarito = ganaron por poco; casi transparente = empate.
-  Ideal con el zoom alejado.
-- **Apilado**: verde abajo = % compradores, rojo arriba = % vendedores (como el vídeo). Mejor con zoom cercano.
+1. Copia todo el código de `velas_por_dentro_pro.pine` (botón de los dos cuadraditos en GitHub).
+2. TradingView (ordenador) → **Editor de Pine** → Ctrl+A, pegar, **Guardar** → **Añadir al gráfico**.
+3. **Oculta las velas normales**: engranaje del gráfico → **Símbolo** → desmarca **Cuerpo**, **Bordes** y **Mecha**.
+4. Pon el gráfico en **15m** para ver velas de **1H** (o la combinación que prefieras de la tabla).
 
-En ambos modos el **borde y la mecha** dicen si la vela subió (azul) o bajó (rojo), y el **amarillo** marca divergencias.
+## La señal del vídeo: retroceso débil → línea → ruptura
 
-| Lo que ves | Qué significa |
-|---|---|
-| Borde azul, casi todo verde dentro | Subida con compradores de verdad. Fuerte. |
-| Borde rojo, casi todo rojo dentro | Bajada con vendedores de verdad. Fuerte. |
-| **Borde amarillo** en vela roja con mucho verde dentro | Bajó, pero dentro mandaron los compradores → **retroceso débil**. |
-| **Borde amarillo** en vela verde con mucho rojo dentro | Subió, pero dentro mandaron los vendedores → **subida débil**. |
-| **Línea azul horizontal** | Máximo de la primera vela de giro tras un retroceso débil (como en el vídeo). |
-| Línea gris punteada | Stop: el mínimo del retroceso. |
-| **COMPRA / VENTA** | El precio cerró rompiendo la línea → confirmación. |
-
-**Ejemplo del vídeo:** en una subida aparecen 3–4 velas rojas (el retroceso), pero por dentro
-tienen más verde que rojo. Los vendedores no tienen fuerza. Cuando sale una vela azul con compradores
-dentro, se marca la línea en su máximo; si el precio la rompe → **COMPRA**, stop bajo el mínimo del retroceso.
-
-El panel (arriba a la derecha) muestra para la vela actual: temporalidad interna usada,
-% compradores, % vendedores, delta (compras − ventas) y si hay un nivel activo.
-
-## Uso por temporalidad
-
-| Tu gráfico | TF interna (Auto) | Velas dentro | Perfil | Consejos |
-|---|---|---|---|---|
-| 1m | 1m ⚠️ | 1 | Scalping | No hay nada que abrir: pon Modo **Manual** y **1S** (requiere plan con segundos). Si no, usa 3m o 5m. |
-| 5m | 1m | 5 | Scalping | Mucho ruido: sube "Velas mínimas del retroceso" a 3. Solo en horas de volumen. |
-| **15m** | 1m | 15 | **Intradía (para empezar)** | El mejor equilibrio. Opera a favor de la tendencia de 1H. |
-| 1H | 1m | 60 | Intradía / swing corto | Lectura interna muy precisa. Ideal en cripto. |
-| 4H | 5m | 48 | Swing | Muy fiable; pocas señales. Usa alertas. |
-| Diario | 15m | 96 (cripto) | Swing / posición | Para la dirección general. Stops amplios → posición más pequeña. |
-| Semanal | 1H | 168 | Inversión | Solo contexto. |
-
-> Las temporalidades internas bajas tienen menos historia: en gráficos lentos verás las velas
-> más antiguas con relleno transparente (estimado). Es normal.
-
-**Método top-down sugerido:**
-
-1. **Dirección** en 4H: ¿las velas buenas tienen relleno del color de la vela y el precio está sobre la EMA 50?
-2. **Retroceso** en 1H o 15m: busca velas en contra con **borde amarillo** (débiles por dentro).
-3. **Entrada** cuando salga **COMPRA/VENTA** al romper la línea.
+1. En una subida aparecen **2 o más velas rojas** (retroceso), pero dentro **la barra verde es más alta**.
+2. Sale una **vela azul** con compradores al mando → se dibuja una **línea azul** en lo alto de su cuerpo,
+   hacia la derecha (como al final del vídeo). La línea gris punteada es el stop (mínimo del retroceso).
+3. Si el precio **cierra por encima de la línea** → **COMPRA**. Si cae bajo el stop o pasan 3 velas, se cancela.
+4. Lo mismo al revés para **VENTA** (rebote débil en bajada).
 
 ## Ajustes
 
-| Parámetro | Por defecto | Cuándo cambiarlo |
+| Parámetro | Por defecto | Para qué |
 |---|---|---|
-| Temporalidad interna | Auto | Manual si quieres más detalle (p. ej. 1S) o más historia (p. ej. 5m). |
-| Velas mínimas del retroceso | 2 | 3 en 1m–5m para filtrar ruido. |
-| % velas con dominio contrario | 50 | 60–70 para menos señales pero más limpias. |
-| Filtrar con EMA | Sí (50) | Desactívalo solo si sabes leer la tendencia tú mismo. |
-| Velas máximas para romper | 10 | Menos si quieres solo rupturas rápidas. |
-| Divergencia si el bando contrario ≥ % | 60 | 65–70 en monedas pequeñas/volátiles si ves demasiado amarillo. |
-| Mostrar % bajo cada vela | No | Actívalo para ver el número exacto de compradores. |
+| Altura de las barras | Comparar | La barra ganadora llena la vela y la otra su proporción. "% del cuerpo" = cada barra mide su %. |
+| Divergencia si el bando contrario ≥ % | 60 | Sube a 65–70 en monedas pequeñas si ves demasiado amarillo. |
+| Velas mínimas del retroceso | 2 | 3 para menos señales y más limpias. |
+| Filtrar con EMA | Sí (20 velas dibujadas) | Solo compras en subida y ventas en bajada. |
+| Mostrar % de compradores | No | Número exacto bajo cada vela. |
 
 ## Alertas
 
-Clic derecho en el gráfico → **Añadir alerta** → Condición: *Velas por Dentro PRO* → elige
-`COMPRA confirmada`, `VENTA confirmada`, `Nivel de compra listo`, `Vela roja con compradores dentro`…
-Marca **"Una vez por cierre de barra"**.
+Clic derecho → **Añadir alerta** → *Velas por Dentro PRO* → `COMPRA confirmada`, `VENTA confirmada`,
+`Nivel de compra listo`, `Nivel de venta listo`. Opción **"Una vez por cierre de barra"**.
 
 ## Gestión del riesgo
 
-- Arriesga **máximo 1 %** de la cuenta por operación: tamaño = (1 % de la cuenta) / (entrada − stop).
-- Busca al menos **2R** (ganar el doble de lo que arriesgas).
-- En forex/CFD el volumen es "de ticks" (número de cambios de precio): sirve, pero es menos preciso que en cripto.
-- Prueba **30–50 operaciones en demo o con Replay** y apunta resultados antes de usar dinero real.
+- Máximo **1 %** de la cuenta por operación: tamaño = (1 % de la cuenta) / (entrada − stop).
+- Objetivo mínimo **2R**.
+- Prueba **30–50 operaciones en demo o Replay** antes de usar dinero real.
 
 > Ningún indicador garantiza ganancias. Es una herramienta de lectura del precio, no un consejo financiero.

@@ -1,58 +1,83 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
-// Velas por Dentro PRO — Compradores vs Vendedores
-// Cada vela se dibuja hueca (borde azul = alcista, rojo = bajista) y por dentro se rellena
-// con el reparto REAL de volumen comprador (verde, abajo) y vendedor (rojo, arriba).
-// El reparto se calcula con las velas de una temporalidad inferior (request.security_lower_tf):
-// el volumen de cada vela interna que cierra arriba cuenta como compra y el de la que cierra abajo, como venta.
-// IMPORTANTE: oculta las velas normales del gráfico (Configuración > Símbolo > desmarca Cuerpo, Bordes y Mecha).
+// Velas por Dentro PRO — estilo "cada vela te cuenta quién mandó"
+// Cada vela de la temporalidad superior se dibuja HUECA (borde azul = alcista, rojo = bajista)
+// y DENTRO lleva dos barras lado a lado: VERDE (izquierda) = compradores, ROJA (derecha) = vendedores.
+// La barra más alta es el bando que mandó dentro de la vela.
+// Compras y ventas salen de las velas internas (request.security_lower_tf): volumen de velas
+// internas que cierran arriba = compra; que cierran abajo = venta.
+// USO: pon el gráfico en una temporalidad MENOR (p. ej. 15m) y el indicador dibuja las velas de 1H.
+// Oculta las velas normales: Configuración > Símbolo > desmarca Cuerpo, Bordes y Mecha.
 
 //@version=6
-indicator("Velas por Dentro PRO", shorttitle = "VxD PRO", overlay = true, max_lines_count = 500, max_labels_count = 500)
+indicator("Velas por Dentro PRO", shorttitle = "VxD PRO", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
 
 // ───────────────────────────── Entradas ─────────────────────────────
+grpTF    = "Vela que se dibuja"
+tfMode   = input.string("Auto", "Temporalidad de las velas", options = ["Auto", "Manual"], group = grpTF, tooltip = "Auto (gráfico → velas): 1m→5m, 3m→15m, 5m→30m, 15m→1H, 30m→2H, 1H→4H, 2H/4H→D, D→W, W→M")
+tfManual = input.timeframe("60", "Temporalidad (modo Manual)", group = grpTF)
+
 grpData   = "Datos internos"
-ltfMode   = input.string("Auto", "Temporalidad interna", options = ["Auto", "Manual"], group = grpData, tooltip = "Auto: gráfico hasta 1H → 1m, hasta 4H → 5m, hasta 1D → 15m, mayor → 1H.\nEn gráfico de 1m elige Manual y 1S (requiere plan con segundos).")
+ltfMode   = input.string("Auto", "TF para medir compras/ventas", options = ["Auto", "Manual"], group = grpData, tooltip = "Auto: gráfico hasta 1H → 1m, hasta 4H → 5m, mayor → 15m.")
 ltfManual = input.timeframe("1", "TF interna (modo Manual)", group = grpData)
 
 grpVis      = "Visual"
 upOutline   = input.color(#4FC3F7, "Borde vela alcista", group = grpVis)
 dnOutline   = input.color(#EF5350, "Borde vela bajista", group = grpVis)
-buyCol      = input.color(#26D07C, "Compradores (dentro)", group = grpVis)
-sellCol     = input.color(#FF5C6C, "Vendedores (dentro)", group = grpVis)
-showDiv     = input.bool(true, "Resaltar divergencias en amarillo", group = grpVis, tooltip = "Vela roja con más compradores dentro, o vela verde con más vendedores dentro.")
+buyCol      = input.color(#26D07C, "Barra compradores (izquierda)", group = grpVis)
+sellCol     = input.color(#FF5C6C, "Barra vendedores (derecha)", group = grpVis)
+heightMode  = input.string("Comparar (el que manda llena la vela)", "Altura de las barras", options = ["Comparar (el que manda llena la vela)", "% del cuerpo"], group = grpVis, tooltip = "Comparar: la barra del bando ganador ocupa todo el cuerpo y la otra su proporción (fácil de ver quién mandó).\n% del cuerpo: cada barra mide su % (ej. 70/30).")
+borderW     = input.int(2, "Grosor del borde", 1, 4, group = grpVis)
+innerTransp = input.int(0, "Transparencia de las barras", 0, 90, group = grpVis)
+showDiv     = input.bool(true, "Resaltar divergencias en amarillo", group = grpVis, tooltip = "Vela roja donde mandaron los compradores, o vela azul donde mandaron los vendedores.")
 divCol      = input.color(#FFC107, "Color divergencia", group = grpVis)
-divThr      = input.int(60, "Divergencia si el bando contrario ≥ %", 50, 100, group = grpVis, tooltip = "Con 50 casi cualquier vela sale amarilla. 60 = solo cuando el bando contrario ganó con claridad. Sube a 65–70 en monedas pequeñas o muy volátiles.")
-fillMode    = input.string("Color dominante", "Modo de relleno", options = ["Color dominante", "Apilado"], group = grpVis, tooltip = "Color dominante: toda la vela del color del bando que ganó; más intenso cuanto mayor la ventaja (ideal con zoom alejado).\nApilado: verde abajo = % compradores, rojo arriba = % vendedores (como el vídeo; mejor con zoom cercano).")
-innerTransp = input.int(15, "Transparencia del relleno", 0, 90, group = grpVis)
-showPct     = input.bool(false, "Mostrar % de compra bajo cada vela", group = grpVis)
+divThr      = input.int(60, "Divergencia si el bando contrario ≥ %", 50, 100, group = grpVis)
+showPct     = input.bool(false, "Mostrar % de compradores bajo cada vela", group = grpVis)
 showTable   = input.bool(true, "Mostrar panel", group = grpVis)
 
 grpSig    = "Retroceso débil y señales"
 showSig   = input.bool(true, "Detectar retrocesos débiles", group = grpSig)
 minPull   = input.int(2, "Velas mínimas del retroceso", 1, group = grpSig)
-weakRatio = input.int(50, "% mínimo de velas del retroceso con dominio contrario", 0, 100, group = grpSig, tooltip = "En un retroceso bajista (velas rojas) dentro de tendencia alcista: % de esas velas rojas que por dentro tienen más compradores.")
-useTrend  = input.bool(true, "Filtrar con EMA de tendencia", group = grpSig)
-emaLen    = input.int(50, "Longitud EMA", 2, group = grpSig)
-maxWait   = input.int(10, "Velas máximas para romper el nivel", 1, group = grpSig)
+weakRatio = input.int(50, "% de velas del retroceso con dominio contrario", 0, 100, group = grpSig, tooltip = "Retroceso bajista dentro de subida: % de esas velas rojas en las que mandaron los compradores.")
+useTrend  = input.bool(true, "Filtrar con EMA (en velas dibujadas)", group = grpSig)
+emaLen    = input.int(20, "Longitud EMA", 2, group = grpSig)
+maxWait   = input.int(3, "Velas dibujadas para romper el nivel", 1, group = grpSig)
 
-// ───────────────────────────── Volumen comprador / vendedor ─────────────────────────────
+// ───────────────────────────── Temporalidades ─────────────────────────────
+autoHTF() =>
+    s = timeframe.in_seconds()
+    s <= 60 ? "5" : s <= 180 ? "15" : s <= 300 ? "30" : s <= 900 ? "60" : s <= 1800 ? "120" : s <= 3600 ? "240" : s <= 14400 ? "D" : s <= 86400 ? "W" : "M"
+
 autoLTF() =>
     s = timeframe.in_seconds()
-    s <= 3600 ? "1" : s <= 14400 ? "5" : s <= 86400 ? "15" : "60"
+    s <= 3600 ? "1" : s <= 14400 ? "5" : "15"
 
-ltf = ltfMode == "Auto" ? autoLTF() : ltfManual
+tfLabel(tf) =>
+    s = timeframe.in_seconds(tf)
+    s < 3600 ? str.tostring(s / 60, "#") + "m" : s < 86400 ? str.tostring(s / 3600, "#") + "H" : tf
+
+htf  = tfMode == "Auto" ? autoHTF() : tfManual
+ltf  = ltfMode == "Auto" ? autoLTF() : ltfManual
+nExp = int(math.round(timeframe.in_seconds(htf) / timeframe.in_seconds()))
+if nExp < 3
+    runtime.error("Cada vela dibujada necesita al menos 3 velas del gráfico. Baja la temporalidad del gráfico (ej. 15m para ver velas de 1H).")
 if timeframe.in_seconds(ltf) > timeframe.in_seconds()
-    runtime.error("La temporalidad interna debe ser menor o igual que la del gráfico.")
+    runtime.error("La TF interna debe ser menor o igual que la del gráfico.")
 
+// Ancho de la vela dibujada (en barras, par para centrar la mecha)
+evenW(n) =>
+    w = n - 1
+    math.max(w - w % 2, 2)
+
+// ───────────────────────────── Compras / ventas de la barra del gráfico ─────────────────────────────
 [ltfO, ltfC, ltfV] = request.security_lower_tf(syminfo.tickerid, ltf, [open, close, volume])
 
 float upV   = 0.0
 float dnV   = 0.0
-int   n     = array.size(ltfC)
-bool  estim = n == 0
-if n > 0
+int   nLtf  = array.size(ltfC)
+bool  estim = nLtf == 0
+if nLtf > 0
     float prevC = close[1]
-    for i = 0 to n - 1
+    for i = 0 to nLtf - 1
         o  = ltfO.get(i)
         c  = ltfC.get(i)
         vi = ltfV.get(i)
@@ -70,50 +95,40 @@ if n > 0
             dnV += w / 2
         prevC := c
 else
-    // Sin datos internos (historia antigua): estimación por la posición del cierre en el rango
+    // Sin datos internos (historia antigua): estimación por la posición del cierre
     w    = na(volume) ? 1.0 : volume
     rng  = high - low
     frac = rng > 0 ? (close - low) / rng : 0.5
     upV  := w * frac
     dnV  := w * (1 - frac)
 
-tot    = upV + dnV
-buyPct = tot > 0 ? upV / tot : 0.5
-delta  = upV - dnV
+// ───────────────────────────── Estado de la vela dibujada ─────────────────────────────
+var int   sBar = na
+var int   mW   = 2
+var float hO   = na
+var float hH   = na
+var float hL   = na
+var float hC   = na
+var float aUp  = 0.0
+var float aDn  = 0.0
+var int   nIn  = 0
+var bool  aEst = false
+var box   bBuy  = na
+var box   bSell = na
+var box   bOut  = na
+var line  lWU   = na
+var line  lWD   = na
+var float hEma  = na
 
-// ───────────────────────────── Dibujo de la vela ─────────────────────────────
-bodyTop   = math.max(open, close)
-bodyBot   = math.min(open, close)
-split     = bodyBot + (bodyTop - bodyBot) * buyPct
-isUp      = close >= open
-divergent = (close < open and buyPct * 100 >= divThr) or (close > open and (1 - buyPct) * 100 >= divThr)
-outline   = showDiv and divergent ? divCol : isUp ? upOutline : dnOutline
-fillTr    = estim ? math.min(innerTransp + 45, 95) : innerTransp
-noCol     = color.new(color.black, 100)
-
-// Color dominante: 50 % → casi transparente, 100 % → color pleno
-stacked = fillMode == "Apilado"
-edge    = math.abs(buyPct - 0.5) * 2
-domTr   = math.min(fillTr + (1 - edge) * (90 - fillTr), 95)
-domCol  = color.new(buyPct >= 0.5 ? buyCol : sellCol, domTr)
-
-plotcandle(open, high, low, close, "Vela (borde, mechas y color dominante)", color = stacked ? noCol : domCol, wickcolor = outline, bordercolor = outline)
-plotcandle(stacked ? bodyBot : na, stacked ? split : na, stacked ? bodyBot : na, stacked ? split : na, "Compradores", color = color.new(buyCol, fillTr), wickcolor = noCol, bordercolor = outline)
-plotcandle(stacked ? split : na, stacked ? bodyTop : na, stacked ? split : na, stacked ? bodyTop : na, "Vendedores", color = color.new(sellCol, fillTr), wickcolor = noCol, bordercolor = outline)
-
-if showPct
-    label.new(bar_index, low, str.tostring(buyPct * 100, "#"), yloc = yloc.belowbar, style = label.style_none, textcolor = buyPct >= 0.5 ? buyCol : sellCol, size = size.tiny)
-
-// ───────────────────────────── Retroceso débil → nivel → ruptura ─────────────────────────────
-ema = ta.ema(close, emaLen)
-
-var int   rL    = 0     // velas rojas seguidas (retroceso dentro de subida)
-var int   rW    = 0     // de ellas, con más compradores dentro
+// Retrocesos (en velas dibujadas)
+var int   rL    = 0
+var int   rW    = 0
 var float rLow  = na
-var int   gL    = 0     // velas verdes seguidas (retroceso dentro de bajada)
-var int   gW    = 0     // de ellas, con más vendedores dentro
+var int   gL    = 0
+var int   gW    = 0
 var float gHigh = na
 
+// Nivel pendiente
 var int   pDir  = 0
 var float pLvl  = na
 var float pStop = na
@@ -121,84 +136,168 @@ var int   pAge  = 0
 var line  pLine = na
 var line  sLine = na
 
+isNew      = timeframe.change(htf) or na(sBar)
 longSetup  = false
 shortSetup = false
 longSig    = false
 shortSig   = false
 
-if showSig and barstate.isconfirmed
-    // 1) Seguimiento del nivel pendiente
-    if pDir != 0
-        pAge += 1
-        broke   = pDir == 1 ? close > pLvl : close < pLvl
-        invalid = pDir == 1 ? close < pStop : close > pStop
-        if broke
-            longSig  := pDir == 1
-            shortSig := pDir == -1
-            line.set_x2(pLine, bar_index)
-            line.set_x2(sLine, bar_index)
-            pDir := 0
-        else if invalid or pAge > maxWait
-            line.set_x2(pLine, bar_index)
-            line.set_x2(sLine, bar_index)
-            line.set_color(pLine, color.gray)
-            pDir := 0
-        else
-            line.set_x2(pLine, bar_index + 1)
-            line.set_x2(sLine, bar_index + 1)
+// ── Cierre de la vela dibujada anterior ──
+if isNew and not na(sBar)
+    // Ajuste de ancho si la vela tuvo menos barras de las esperadas (fines de sesión)
+    if nIn < nExp
+        mW := math.max(nIn - 1 - (nIn - 1) % 2, 0)
+        midP = sBar + int(mW / 2)
+        box.set_right(bOut, sBar + mW)
+        box.set_right(bBuy, midP)
+        box.set_left(bSell, midP)
+        box.set_right(bSell, sBar + mW)
+        line.set_x1(lWU, midP)
+        line.set_x2(lWU, midP)
+        line.set_x1(lWD, midP)
+        line.set_x2(lWD, midP)
 
-    // 2) Construcción de retrocesos y detección del giro
-    if close < open
-        if gL >= minPull and gW * 100 >= weakRatio * gL and buyPct < 0.5 and (not useTrend or close < ema)
-            shortSetup := true
-            pDir  := -1
-            pLvl  := low
-            pStop := math.max(gHigh, high)
-        gL    := 0
-        gW    := 0
-        gHigh := na
-        rLow  := rL == 0 ? low : math.min(rLow, low)
-        rL    += 1
-        rW    += buyPct > 0.5 ? 1 : 0
-    else if close > open
-        if rL >= minPull and rW * 100 >= weakRatio * rL and buyPct > 0.5 and (not useTrend or close > ema)
-            longSetup := true
-            pDir  := 1
-            pLvl  := high
-            pStop := math.min(rLow, low)
-        rL    := 0
-        rW    := 0
-        rLow  := na
-        gHigh := gL == 0 ? high : math.max(gHigh, high)
-        gL    += 1
-        gW    += buyPct < 0.5 ? 1 : 0
+    totP = aUp + aDn
+    bp   = totP > 0 ? aUp / totP : 0.5
+    hEma := na(hEma) ? hC : hEma + (hC - hEma) * 2.0 / (emaLen + 1)
 
-    if longSetup or shortSetup
-        pAge  := 0
-        lc     = longSetup ? upOutline : dnOutline
-        pLine := line.new(bar_index, pLvl, bar_index + 1, pLvl, color = lc, width = 2)
-        sLine := line.new(bar_index, pStop, bar_index + 1, pStop, color = color.new(color.gray, 30), style = line.style_dotted)
+    if showPct
+        label.new(sBar + int(mW / 2), hL, str.tostring(bp * 100, "#") + "%", style = label.style_label_up, color = color.new(color.black, 100), textcolor = bp >= 0.5 ? buyCol : sellCol, size = size.tiny)
+
+    if showSig
+        if pDir != 0
+            pAge += 1
+            if pAge > maxWait
+                line.set_color(pLine, color.gray)
+                pDir := 0
+        if hC < hO
+            // Vela roja: ¿termina un rebote débil dentro de bajada?
+            if gL >= minPull and gW * 100 >= weakRatio * gL and bp < 0.5 and (not useTrend or hC < hEma)
+                shortSetup := true
+                pDir  := -1
+                pLvl  := math.min(hO, hC)
+                pStop := math.max(gHigh, hH)
+            gL    := 0
+            gW    := 0
+            gHigh := na
+            rLow  := rL == 0 ? hL : math.min(rLow, hL)
+            rL    += 1
+            rW    += bp > 0.5 ? 1 : 0
+        else if hC > hO
+            // Vela azul: ¿termina un retroceso débil dentro de subida?
+            if rL >= minPull and rW * 100 >= weakRatio * rL and bp > 0.5 and (not useTrend or hC > hEma)
+                longSetup := true
+                pDir  := 1
+                pLvl  := math.max(hO, hC)
+                pStop := math.min(rLow, hL)
+            rL    := 0
+            rW    := 0
+            rLow  := na
+            gHigh := gL == 0 ? hH : math.max(gHigh, hH)
+            gL    += 1
+            gW    += bp < 0.5 ? 1 : 0
+
+        if longSetup or shortSetup
+            pAge  := 0
+            lc     = longSetup ? upOutline : dnOutline
+            // Línea desde el cuerpo de la vela de giro hacia la derecha (como en el vídeo)
+            pLine := line.new(sBar, pLvl, bar_index, pLvl, color = lc, width = 2)
+            sLine := line.new(sBar, pStop, bar_index, pStop, color = color.new(color.gray, 30), style = line.style_dotted)
+
+// ── Nueva vela dibujada: reiniciar ──
+if isNew
+    sBar := bar_index
+    mW   := evenW(nExp)
+    hO   := open
+    hH   := high
+    hL   := low
+    aUp  := 0.0
+    aDn  := 0.0
+    nIn  := 0
+    aEst := false
+    bBuy  := box.new(sBar, open, sBar, open, border_color = color.new(color.black, 100), border_width = 0, bgcolor = color.new(buyCol, innerTransp))
+    bSell := box.new(sBar, open, sBar, open, border_color = color.new(color.black, 100), border_width = 0, bgcolor = color.new(sellCol, innerTransp))
+    bOut  := box.new(sBar, open, sBar, open, border_width = borderW, bgcolor = color.new(color.black, 100))
+    lWU   := line.new(sBar, open, sBar, open, width = borderW)
+    lWD   := line.new(sBar, open, sBar, open, width = borderW)
+else
+    hH := math.max(hH, high)
+    hL := math.min(hL, low)
+hC   := close
+aUp  += upV
+aDn  += dnV
+nIn  += 1
+aEst := aEst or estim
+
+// ── Dibujo / actualización de la vela ──
+top     = math.max(hO, hC)
+bot     = math.min(hO, hC)
+body    = top - bot
+tot     = aUp + aDn
+bpNow   = tot > 0 ? aUp / tot : 0.5
+mx      = math.max(aUp, aDn)
+hBuy    = heightMode == "% del cuerpo" ? body * bpNow : mx > 0 ? body * aUp / mx : body / 2
+hSell   = heightMode == "% del cuerpo" ? body * (1 - bpNow) : mx > 0 ? body * aDn / mx : body / 2
+isUp    = hC >= hO
+diverg  = (hC < hO and bpNow * 100 >= divThr) or (hC > hO and (1 - bpNow) * 100 >= divThr)
+outline = showDiv and diverg ? divCol : isUp ? upOutline : dnOutline
+fillTr  = aEst ? math.min(innerTransp + 50, 95) : innerTransp
+rightX  = sBar + mW
+midX    = sBar + int(mW / 2)
+
+box.set_lefttop(bBuy, sBar, bot + hBuy)
+box.set_rightbottom(bBuy, midX, bot)
+box.set_bgcolor(bBuy, color.new(buyCol, fillTr))
+box.set_lefttop(bSell, midX, bot + hSell)
+box.set_rightbottom(bSell, rightX, bot)
+box.set_bgcolor(bSell, color.new(sellCol, fillTr))
+box.set_lefttop(bOut, sBar, top)
+box.set_rightbottom(bOut, rightX, bot)
+box.set_border_color(bOut, outline)
+line.set_xy1(lWU, midX, hH)
+line.set_xy2(lWU, midX, top)
+line.set_color(lWU, outline)
+line.set_xy1(lWD, midX, bot)
+line.set_xy2(lWD, midX, hL)
+line.set_color(lWD, outline)
+
+// ── Ruptura del nivel (se comprueba en cada vela del gráfico ya cerrada) ──
+if showSig and pDir != 0 and barstate.isconfirmed and not longSetup and not shortSetup
+    broke   = pDir == 1 ? close > pLvl : close < pLvl
+    invalid = pDir == 1 ? close < pStop : close > pStop
+    if broke
+        longSig  := pDir == 1
+        shortSig := pDir == -1
+        line.set_x2(pLine, bar_index)
+        line.set_x2(sLine, bar_index)
+        pDir := 0
+    else if invalid
+        line.set_x2(pLine, bar_index)
+        line.set_x2(sLine, bar_index)
+        line.set_color(pLine, color.gray)
+        pDir := 0
+if pDir != 0
+    line.set_x2(pLine, bar_index + 1)
+    line.set_x2(sLine, bar_index + 1)
 
 plotshape(longSig, "Compra", shape.triangleup, location.belowbar, upOutline, size = size.small, text = "COMPRA", textcolor = upOutline)
 plotshape(shortSig, "Venta", shape.triangledown, location.abovebar, dnOutline, size = size.small, text = "VENTA", textcolor = dnOutline)
 
-alertcondition(showDiv and divergent and close < open, "Vela roja con compradores dentro", "VxD: vela roja dominada por compradores (venta débil).")
-alertcondition(showDiv and divergent and close > open, "Vela verde con vendedores dentro", "VxD: vela verde dominada por vendedores (compra débil).")
-alertcondition(longSetup, "Nivel de compra listo", "VxD: retroceso débil terminado. Vigila la ruptura del máximo.")
-alertcondition(shortSetup, "Nivel de venta listo", "VxD: retroceso débil terminado. Vigila la ruptura del mínimo.")
+alertcondition(longSetup, "Nivel de compra listo", "VxD: retroceso débil terminado. Vigila la ruptura de la línea.")
+alertcondition(shortSetup, "Nivel de venta listo", "VxD: rebote débil terminado. Vigila la ruptura de la línea.")
 alertcondition(longSig, "COMPRA confirmada", "VxD: ruptura alcista tras retroceso débil.")
-alertcondition(shortSig, "VENTA confirmada", "VxD: ruptura bajista tras retroceso débil.")
+alertcondition(shortSig, "VENTA confirmada", "VxD: ruptura bajista tras rebote débil.")
 
 // ───────────────────────────── Panel ─────────────────────────────
 var table tb = table.new(position.top_right, 2, 5, bgcolor = color.new(#0B1220, 10), border_color = color.new(color.gray, 70), border_width = 1)
 if showTable and barstate.islast
-    table.cell(tb, 0, 0, "TF interna", text_color = color.silver, text_size = size.small)
-    table.cell(tb, 1, 0, ltf + " (" + str.tostring(n) + " velas)", text_color = n <= 1 ? color.orange : color.white, text_size = size.small)
+    table.cell(tb, 0, 0, "Velas dibujadas", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 0, tfLabel(htf) + " (dentro " + tfLabel(ltf) + ")", text_color = color.white, text_size = size.small)
     table.cell(tb, 0, 1, "Compradores", text_color = color.silver, text_size = size.small)
-    table.cell(tb, 1, 1, str.tostring(buyPct * 100, "#") + "%", text_color = buyCol, text_size = size.small)
+    table.cell(tb, 1, 1, str.tostring(bpNow * 100, "#") + "%", text_color = buyCol, text_size = size.small)
     table.cell(tb, 0, 2, "Vendedores", text_color = color.silver, text_size = size.small)
-    table.cell(tb, 1, 2, str.tostring(100 - buyPct * 100, "#") + "%", text_color = sellCol, text_size = size.small)
-    table.cell(tb, 0, 3, "Delta", text_color = color.silver, text_size = size.small)
-    table.cell(tb, 1, 3, str.tostring(delta, format.volume), text_color = delta >= 0 ? buyCol : sellCol, text_size = size.small)
+    table.cell(tb, 1, 2, str.tostring(100 - bpNow * 100, "#") + "%", text_color = sellCol, text_size = size.small)
+    table.cell(tb, 0, 3, "Mandan", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 3, bpNow > 0.5 ? "COMPRADORES" : bpNow < 0.5 ? "VENDEDORES" : "Empate", text_color = bpNow >= 0.5 ? buyCol : sellCol, text_size = size.small)
     table.cell(tb, 0, 4, "Nivel activo", text_color = color.silver, text_size = size.small)
     table.cell(tb, 1, 4, pDir == 1 ? "Compra > " + str.tostring(pLvl, format.mintick) : pDir == -1 ? "Venta < " + str.tostring(pLvl, format.mintick) : "—", text_color = color.yellow, text_size = size.small)
