@@ -35,6 +35,15 @@ internos (velas muy antiguas), se estima por la posición del cierre y el rellen
 
 ## Cómo leerlo
 
+### Modo de relleno (ajuste "Modo de relleno")
+
+- **Color dominante** (por defecto): toda la vela se pinta del color del bando que ganó.
+  Verde fuerte = muchos más compradores; verde clarito = ganaron por poco; casi transparente = empate.
+  Ideal con el zoom alejado.
+- **Apilado**: verde abajo = % compradores, rojo arriba = % vendedores (como el vídeo). Mejor con zoom cercano.
+
+En ambos modos el **borde y la mecha** dicen si la vela subió (azul) o bajó (rojo), y el **amarillo** marca divergencias.
+
 | Lo que ves | Qué significa |
 |---|---|
 | Borde azul, casi todo verde dentro | Subida con compradores de verdad. Fuerte. |

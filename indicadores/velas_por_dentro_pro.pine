@@ -21,6 +21,7 @@ buyCol      = input.color(#26D07C, "Compradores (dentro)", group = grpVis)
 sellCol     = input.color(#FF5C6C, "Vendedores (dentro)", group = grpVis)
 showDiv     = input.bool(true, "Resaltar divergencias en amarillo", group = grpVis, tooltip = "Vela roja con más compradores dentro, o vela verde con más vendedores dentro.")
 divCol      = input.color(#FFC107, "Color divergencia", group = grpVis)
+fillMode    = input.string("Color dominante", "Modo de relleno", options = ["Color dominante", "Apilado"], group = grpVis, tooltip = "Color dominante: toda la vela del color del bando que ganó; más intenso cuanto mayor la ventaja (ideal con zoom alejado).\nApilado: verde abajo = % compradores, rojo arriba = % vendedores (como el vídeo; mejor con zoom cercano).")
 innerTransp = input.int(15, "Transparencia del relleno", 0, 90, group = grpVis)
 showPct     = input.bool(false, "Mostrar % de compra bajo cada vela", group = grpVis)
 showTable   = input.bool(true, "Mostrar panel", group = grpVis)
@@ -89,9 +90,15 @@ outline   = showDiv and divergent ? divCol : isUp ? upOutline : dnOutline
 fillTr    = estim ? math.min(innerTransp + 45, 95) : innerTransp
 noCol     = color.new(color.black, 100)
 
-plotcandle(open, high, low, close, "Vela (borde y mechas)", color = noCol, wickcolor = outline, bordercolor = outline)
-plotcandle(bodyBot, split, bodyBot, split, "Compradores", color = color.new(buyCol, fillTr), wickcolor = noCol, bordercolor = outline)
-plotcandle(split, bodyTop, split, bodyTop, "Vendedores", color = color.new(sellCol, fillTr), wickcolor = noCol, bordercolor = outline)
+// Color dominante: 50 % → casi transparente, 100 % → color pleno
+stacked = fillMode == "Apilado"
+edge    = math.abs(buyPct - 0.5) * 2
+domTr   = math.min(fillTr + (1 - edge) * (90 - fillTr), 95)
+domCol  = color.new(buyPct >= 0.5 ? buyCol : sellCol, domTr)
+
+plotcandle(open, high, low, close, "Vela (borde, mechas y color dominante)", color = stacked ? noCol : domCol, wickcolor = outline, bordercolor = outline)
+plotcandle(stacked ? bodyBot : na, stacked ? split : na, stacked ? bodyBot : na, stacked ? split : na, "Compradores", color = color.new(buyCol, fillTr), wickcolor = noCol, bordercolor = outline)
+plotcandle(stacked ? split : na, stacked ? bodyTop : na, stacked ? split : na, stacked ? bodyTop : na, "Vendedores", color = color.new(sellCol, fillTr), wickcolor = noCol, bordercolor = outline)
 
 if showPct
     label.new(bar_index, low, str.tostring(buyPct * 100, "#"), yloc = yloc.belowbar, style = label.style_none, textcolor = buyPct >= 0.5 ? buyCol : sellCol, size = size.tiny)
