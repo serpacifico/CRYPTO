@@ -5,6 +5,8 @@
 // La barra más alta es el bando que mandó dentro de la vela.
 // Compras y ventas salen de las velas internas (request.security_lower_tf): volumen de velas
 // internas que cierran arriba = compra; que cierran abajo = venta.
+// Lectura avanzada: volumen relativo (esfuerzo), absorción (⚡), delta del retroceso,
+// nota de calidad de cada señal (A+/A/B/C) y estadística real de las señales en el panel.
 // USO: pon el gráfico en una temporalidad MENOR (p. ej. 15m) y el indicador dibuja las velas de 1H.
 // Oculta las velas normales: Configuración > Símbolo > desmarca Cuerpo, Bordes y Mecha.
 
@@ -17,7 +19,7 @@ tfMode   = input.string("Auto", "Temporalidad de las velas", options = ["Auto", 
 tfManual = input.timeframe("60", "Temporalidad (modo Manual)", group = grpTF)
 
 grpData   = "Datos internos"
-ltfMode   = input.string("Auto", "TF para medir compras/ventas", options = ["Auto", "Manual"], group = grpData, tooltip = "Auto: gráfico hasta 1H → 1m, hasta 4H → 5m, mayor → 15m.")
+ltfMode   = input.string("Auto", "TF para medir compras/ventas", options = ["Auto", "Manual"], group = grpData, tooltip = "Auto: gráfico hasta 1H → 1m, hasta 4H → 5m, mayor → 15m.\nCuanto más pequeña, más precisa (1S/5S si tu plan tiene segundos).")
 ltfManual = input.timeframe("1", "TF interna (modo Manual)", group = grpData)
 
 grpVis      = "Visual"
@@ -34,13 +36,21 @@ divThr      = input.int(60, "Divergencia si el bando contrario ≥ %", 50, 100, 
 showPct     = input.bool(false, "Mostrar % de compradores bajo cada vela", group = grpVis)
 showTable   = input.bool(true, "Mostrar panel", group = grpVis)
 
+grpVol  = "Volumen relativo (esfuerzo)"
+rvolLen = input.int(20, "Velas para el volumen medio", 5, group = grpVol)
+lowRv   = input.float(0.7, "Volumen bajo si < x media (barras apagadas)", 0.1, 1.0, 0.1, group = grpVol)
+hiRv    = input.float(1.5, "Volumen alto si ≥ x media (borde grueso)", 1.0, 5.0, 0.1, group = grpVol)
+showAbs = input.bool(true, "Marcar absorción ⚡ (divergencia + volumen alto)", group = grpVol, tooltip = "Mucho volumen de un bando y aun así el precio cierra en contra: el otro bando absorbió con órdenes límite. Suele marcar giros.")
+
 grpSig    = "Retroceso débil y señales"
 showSig   = input.bool(true, "Detectar retrocesos débiles", group = grpSig)
 minPull   = input.int(2, "Velas mínimas del retroceso", 1, group = grpSig)
 weakRatio = input.int(50, "% de velas del retroceso con dominio contrario", 0, 100, group = grpSig, tooltip = "Retroceso bajista dentro de subida: % de esas velas rojas en las que mandaron los compradores.")
-useTrend  = input.bool(true, "Filtrar con EMA (en velas dibujadas)", group = grpSig)
-emaLen    = input.int(20, "Longitud EMA", 2, group = grpSig)
+useTrend  = input.bool(true, "Exigir tendencia a favor (EMA)", group = grpSig)
+emaLen    = input.int(20, "Longitud EMA (en velas dibujadas)", 2, group = grpSig)
+minScore  = input.int(3, "Nota mínima para dar señal (0–5)", 0, 5, group = grpSig, tooltip = "5 = A+, 4 = A, 3 = B. Sube a 4 para menos señales y más fiables.")
 maxWait   = input.int(3, "Velas dibujadas para romper el nivel", 1, group = grpSig)
+tpR       = input.float(2.0, "Objetivo (múltiplo del riesgo, R)", 0.5, 10.0, 0.5, group = grpSig)
 
 // ───────────────────────────── Temporalidades ─────────────────────────────
 autoHTF() =>
@@ -53,7 +63,7 @@ autoLTF() =>
 
 tfLabel(tf) =>
     s = timeframe.in_seconds(tf)
-    s < 3600 ? str.tostring(s / 60, "#") + "m" : s < 86400 ? str.tostring(s / 3600, "#") + "H" : tf
+    s < 60 ? str.tostring(s, "#") + "s" : s < 3600 ? str.tostring(s / 60, "#") + "m" : s < 86400 ? str.tostring(s / 3600, "#") + "H" : tf
 
 htf  = tfMode == "Auto" ? autoHTF() : tfManual
 ltf  = ltfMode == "Auto" ? autoLTF() : ltfManual
@@ -119,28 +129,49 @@ var box   bOut  = na
 var line  lWU   = na
 var line  lWD   = na
 var float hEma  = na
+var float hEmaP = na
+var array<float> vols = array.new<float>()
 
-// Retrocesos (en velas dibujadas)
-var int   rL    = 0
-var int   rW    = 0
-var float rLow  = na
-var int   gL    = 0
-var int   gW    = 0
-var float gHigh = na
+// Retroceso alcista (velas rojas dentro de subida) y bajista (velas azules dentro de bajada)
+var int   rL     = 0
+var int   rW     = 0
+var float rLow   = na
+var float rDelta = 0.0
+var float rRv    = 0.0
+var int   gL     = 0
+var int   gW     = 0
+var float gHigh  = na
+var float gDelta = 0.0
+var float gRv    = 0.0
 
 // Nivel pendiente
-var int   pDir  = 0
-var float pLvl  = na
-var float pStop = na
-var int   pAge  = 0
-var line  pLine = na
-var line  sLine = na
+var int    pDir   = 0
+var float  pLvl   = na
+var float  pStop  = na
+var int    pAge   = 0
+var string pGrade = ""
+var line   pLine  = na
+var line   sLine  = na
+
+// Operación en curso (para la estadística)
+var int   tDir   = 0
+var int   tBar   = na
+var float tEntry = na
+var float tStop  = na
+var float tTP    = na
+var line  tpLine = na
+var int   nT     = 0
+var int   nWin   = 0
+var float sumR   = 0.0
 
 isNew      = timeframe.change(htf) or na(sBar)
 longSetup  = false
 shortSetup = false
 longSig    = false
 shortSig   = false
+
+gradeOf(sc) =>
+    sc >= 5 ? "A+" : sc == 4 ? "A" : sc == 3 ? "B" : "C"
 
 // ── Cierre de la vela dibujada anterior ──
 if isNew and not na(sBar)
@@ -157,12 +188,27 @@ if isNew and not na(sBar)
         line.set_x1(lWD, midP)
         line.set_x2(lWD, midP)
 
-    totP = aUp + aDn
-    bp   = totP > 0 ? aUp / totP : 0.5
-    hEma := na(hEma) ? hC : hEma + (hC - hEma) * 2.0 / (emaLen + 1)
+    totP  = aUp + aDn
+    bp    = totP > 0 ? aUp / totP : 0.5
+    dlt   = aUp - aDn
+    avgV  = vols.size() > 0 ? vols.avg() : na
+    rv    = na(avgV) or avgV == 0 ? 1.0 : totP / avgV
+    vols.push(totP)
+    if vols.size() > rvolLen
+        vols.shift()
+    hEmaP := hEma
+    hEma  := na(hEma) ? hC : hEma + (hC - hEma) * 2.0 / (emaLen + 1)
+    upTrend = hC > hEma and (na(hEmaP) or hEma >= hEmaP)
+    dnTrend = hC < hEma and (na(hEmaP) or hEma <= hEmaP)
+    midF    = sBar + int(mW / 2)
+    divF    = (hC < hO and bp * 100 >= divThr) or (hC > hO and (1 - bp) * 100 >= divThr)
 
     if showPct
-        label.new(sBar + int(mW / 2), hL, str.tostring(bp * 100, "#") + "%", style = label.style_label_up, color = color.new(color.black, 100), textcolor = bp >= 0.5 ? buyCol : sellCol, size = size.tiny)
+        label.new(midF, hL, str.tostring(bp * 100, "#") + "%", style = label.style_label_up, color = color.new(color.black, 100), textcolor = bp >= 0.5 ? buyCol : sellCol, size = size.tiny)
+
+    if showAbs and divF and rv >= hiRv
+        absBuy = hC < hO
+        label.new(midF, absBuy ? hL : hH, "⚡", style = absBuy ? label.style_label_up : label.style_label_down, color = color.new(color.black, 100), textcolor = divCol, size = size.normal, tooltip = (absBuy ? "Absorción compradora: vela roja, pero " + str.tostring(bp * 100, "#") + "% compradores" : "Absorción vendedora: vela azul, pero " + str.tostring(100 - bp * 100, "#") + "% vendedores") + "\nVolumen: " + str.tostring(rv, "#.#") + "x la media")
 
     if showSig
         if pDir != 0
@@ -172,30 +218,56 @@ if isNew and not na(sBar)
                 pDir := 0
         if hC < hO
             // Vela roja: ¿termina un rebote débil dentro de bajada?
-            if gL >= minPull and gW * 100 >= weakRatio * gL and bp < 0.5 and (not useTrend or hC < hEma)
-                shortSetup := true
-                pDir  := -1
-                pLvl  := math.min(hO, hC)
-                pStop := math.max(gHigh, hH)
-            gL    := 0
-            gW    := 0
-            gHigh := na
-            rLow  := rL == 0 ? hL : math.min(rLow, hL)
-            rL    += 1
-            rW    += bp > 0.5 ? 1 : 0
+            if gL >= minPull and gW * 100 >= weakRatio * gL and bp < 0.5 and (not useTrend or dnTrend)
+                c1 = dnTrend
+                c2 = gW * 100 >= 75 * gL
+                c3 = gDelta <= 0
+                c4 = gRv / gL < 1.0
+                c5 = rv >= 1.0 and (1 - bp) * 100 >= divThr
+                sc = (c1 ? 1 : 0) + (c2 ? 1 : 0) + (c3 ? 1 : 0) + (c4 ? 1 : 0) + (c5 ? 1 : 0)
+                if sc >= minScore
+                    shortSetup := true
+                    pDir   := -1
+                    pLvl   := math.min(hO, hC)
+                    pStop  := math.max(gHigh, hH)
+                    pGrade := gradeOf(sc)
+                    label.new(midF, hH, pGrade, style = label.style_label_down, color = color.new(dnOutline, 15), textcolor = color.white, size = size.small, tooltip = "Nota " + str.tostring(sc) + "/5\n" + (c1 ? "✔" : "✘") + " Tendencia bajista (EMA)\n" + (c2 ? "✔" : "✘") + " Rebote con vendedores en ≥75% de velas\n" + (c3 ? "✔" : "✘") + " Delta del rebote negativo\n" + (c4 ? "✔" : "✘") + " Rebote con poco volumen\n" + (c5 ? "✔" : "✘") + " Vela de giro con volumen y vendedores ≥" + str.tostring(divThr) + "%")
+            gL     := 0
+            gW     := 0
+            gHigh  := na
+            gDelta := 0.0
+            gRv    := 0.0
+            rLow   := rL == 0 ? hL : math.min(rLow, hL)
+            rL     += 1
+            rW     += bp > 0.5 ? 1 : 0
+            rDelta += dlt
+            rRv    += rv
         else if hC > hO
             // Vela azul: ¿termina un retroceso débil dentro de subida?
-            if rL >= minPull and rW * 100 >= weakRatio * rL and bp > 0.5 and (not useTrend or hC > hEma)
-                longSetup := true
-                pDir  := 1
-                pLvl  := math.max(hO, hC)
-                pStop := math.min(rLow, hL)
-            rL    := 0
-            rW    := 0
-            rLow  := na
-            gHigh := gL == 0 ? hH : math.max(gHigh, hH)
-            gL    += 1
-            gW    += bp < 0.5 ? 1 : 0
+            if rL >= minPull and rW * 100 >= weakRatio * rL and bp > 0.5 and (not useTrend or upTrend)
+                c1 = upTrend
+                c2 = rW * 100 >= 75 * rL
+                c3 = rDelta >= 0
+                c4 = rRv / rL < 1.0
+                c5 = rv >= 1.0 and bp * 100 >= divThr
+                sc = (c1 ? 1 : 0) + (c2 ? 1 : 0) + (c3 ? 1 : 0) + (c4 ? 1 : 0) + (c5 ? 1 : 0)
+                if sc >= minScore
+                    longSetup := true
+                    pDir   := 1
+                    pLvl   := math.max(hO, hC)
+                    pStop  := math.min(rLow, hL)
+                    pGrade := gradeOf(sc)
+                    label.new(midF, hL, pGrade, style = label.style_label_up, color = color.new(upOutline, 15), textcolor = color.black, size = size.small, tooltip = "Nota " + str.tostring(sc) + "/5\n" + (c1 ? "✔" : "✘") + " Tendencia alcista (EMA)\n" + (c2 ? "✔" : "✘") + " Retroceso con compradores en ≥75% de velas\n" + (c3 ? "✔" : "✘") + " Delta del retroceso positivo\n" + (c4 ? "✔" : "✘") + " Retroceso con poco volumen\n" + (c5 ? "✔" : "✘") + " Vela de giro con volumen y compradores ≥" + str.tostring(divThr) + "%")
+            rL     := 0
+            rW     := 0
+            rLow   := na
+            rDelta := 0.0
+            rRv    := 0.0
+            gHigh  := gL == 0 ? hH : math.max(gHigh, hH)
+            gL     += 1
+            gW     += bp < 0.5 ? 1 : 0
+            gDelta += dlt
+            gRv    += rv
 
         if longSetup or shortSetup
             pAge  := 0
@@ -238,12 +310,17 @@ bpNow   = tot > 0 ? aUp / tot : 0.5
 mx      = math.max(aUp, aDn)
 hBuy    = heightMode == "% del cuerpo" ? body * bpNow : mx > 0 ? body * aUp / mx : body / 2
 hSell   = heightMode == "% del cuerpo" ? body * (1 - bpNow) : mx > 0 ? body * aDn / mx : body / 2
+avgNow  = vols.size() > 0 ? vols.avg() : na
+rvNow   = na(avgNow) or avgNow == 0 ? 1.0 : tot / avgNow
+// Volumen proyectado de la vela en curso para no "apagar" una vela que acaba de empezar
+rvProj  = nIn < nExp and nIn > 0 ? rvNow * nExp / nIn : rvNow
 isUp    = hC >= hO
 diverg  = (hC < hO and bpNow * 100 >= divThr) or (hC > hO and (1 - bpNow) * 100 >= divThr)
 outline = showDiv and diverg ? divCol : isUp ? upOutline : dnOutline
-fillTr  = aEst ? math.min(innerTransp + 50, 95) : innerTransp
+fillTr  = aEst ? math.min(innerTransp + 50, 95) : rvProj < lowRv ? math.min(innerTransp + 55, 90) : innerTransp
 rightX  = sBar + mW
 midX    = sBar + int(mW / 2)
+bw      = rvProj >= hiRv ? borderW + 1 : borderW
 
 box.set_lefttop(bBuy, sBar, bot + hBuy)
 box.set_rightbottom(bBuy, midX, bot)
@@ -254,6 +331,7 @@ box.set_bgcolor(bSell, color.new(sellCol, fillTr))
 box.set_lefttop(bOut, sBar, top)
 box.set_rightbottom(bOut, rightX, bot)
 box.set_border_color(bOut, outline)
+box.set_border_width(bOut, bw)
 line.set_xy1(lWU, midX, hH)
 line.set_xy2(lWU, midX, top)
 line.set_color(lWU, outline)
@@ -280,6 +358,29 @@ if pDir != 0
     line.set_x2(pLine, bar_index + 1)
     line.set_x2(sLine, bar_index + 1)
 
+// ── Seguimiento de la operación: stop primero (conservador), luego objetivo ──
+if tDir != 0 and barstate.isconfirmed and bar_index > tBar
+    hitStop = tDir == 1 ? low <= tStop : high >= tStop
+    hitTP   = tDir == 1 ? high >= tTP : low <= tTP
+    if hitStop or hitTP
+        nT   += 1
+        nWin += hitStop ? 0 : 1
+        sumR += hitStop ? -1.0 : tpR
+        line.set_x2(tpLine, bar_index)
+        tDir := 0
+    else
+        line.set_x2(tpLine, bar_index + 1)
+
+if (longSig or shortSig) and tDir == 0
+    risk = math.abs(close - pStop)
+    if risk > 0
+        tDir   := longSig ? 1 : -1
+        tBar   := bar_index
+        tEntry := close
+        tStop  := pStop
+        tTP    := close + tDir * tpR * risk
+        tpLine := line.new(bar_index, tTP, bar_index + 1, tTP, color = color.new(buyCol, 0), style = line.style_dashed)
+
 plotshape(longSig, "Compra", shape.triangleup, location.belowbar, upOutline, size = size.small, text = "COMPRA", textcolor = upOutline)
 plotshape(shortSig, "Venta", shape.triangledown, location.abovebar, dnOutline, size = size.small, text = "VENTA", textcolor = dnOutline)
 
@@ -289,15 +390,20 @@ alertcondition(longSig, "COMPRA confirmada", "VxD: ruptura alcista tras retroces
 alertcondition(shortSig, "VENTA confirmada", "VxD: ruptura bajista tras rebote débil.")
 
 // ───────────────────────────── Panel ─────────────────────────────
-var table tb = table.new(position.top_right, 2, 5, bgcolor = color.new(#0B1220, 10), border_color = color.new(color.gray, 70), border_width = 1)
+var table tb = table.new(position.top_right, 2, 7, bgcolor = color.new(#0B1220, 10), border_color = color.new(color.gray, 70), border_width = 1)
 if showTable and barstate.islast
+    wr = nT > 0 ? nWin * 100.0 / nT : 0.0
     table.cell(tb, 0, 0, "Velas dibujadas", text_color = color.silver, text_size = size.small)
     table.cell(tb, 1, 0, tfLabel(htf) + " (dentro " + tfLabel(ltf) + ")", text_color = color.white, text_size = size.small)
-    table.cell(tb, 0, 1, "Compradores", text_color = color.silver, text_size = size.small)
-    table.cell(tb, 1, 1, str.tostring(bpNow * 100, "#") + "%", text_color = buyCol, text_size = size.small)
-    table.cell(tb, 0, 2, "Vendedores", text_color = color.silver, text_size = size.small)
-    table.cell(tb, 1, 2, str.tostring(100 - bpNow * 100, "#") + "%", text_color = sellCol, text_size = size.small)
-    table.cell(tb, 0, 3, "Mandan", text_color = color.silver, text_size = size.small)
-    table.cell(tb, 1, 3, bpNow > 0.5 ? "COMPRADORES" : bpNow < 0.5 ? "VENDEDORES" : "Empate", text_color = bpNow >= 0.5 ? buyCol : sellCol, text_size = size.small)
+    table.cell(tb, 0, 1, "Compra / Venta", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 1, str.tostring(bpNow * 100, "#") + "% / " + str.tostring(100 - bpNow * 100, "#") + "%", text_color = bpNow >= 0.5 ? buyCol : sellCol, text_size = size.small)
+    table.cell(tb, 0, 2, "Mandan", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 2, bpNow > 0.5 ? "COMPRADORES" : bpNow < 0.5 ? "VENDEDORES" : "Empate", text_color = bpNow >= 0.5 ? buyCol : sellCol, text_size = size.small)
+    table.cell(tb, 0, 3, "Volumen (proyectado)", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 3, str.tostring(rvProj, "#.#") + "x media", text_color = rvProj >= hiRv ? color.yellow : rvProj < lowRv ? color.gray : color.white, text_size = size.small)
     table.cell(tb, 0, 4, "Nivel activo", text_color = color.silver, text_size = size.small)
-    table.cell(tb, 1, 4, pDir == 1 ? "Compra > " + str.tostring(pLvl, format.mintick) : pDir == -1 ? "Venta < " + str.tostring(pLvl, format.mintick) : "—", text_color = color.yellow, text_size = size.small)
+    table.cell(tb, 1, 4, pDir == 1 ? pGrade + " Compra > " + str.tostring(pLvl, format.mintick) : pDir == -1 ? pGrade + " Venta < " + str.tostring(pLvl, format.mintick) : "—", text_color = color.yellow, text_size = size.small)
+    table.cell(tb, 0, 5, "Señales (aciertos)", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 5, str.tostring(nT) + " (" + str.tostring(wr, "#") + "%)", text_color = wr >= 100 / (1 + tpR) ? buyCol : sellCol, text_size = size.small)
+    table.cell(tb, 0, 6, "Resultado total", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 6, (sumR >= 0 ? "+" : "") + str.tostring(sumR, "#.#") + "R", text_color = sumR >= 0 ? buyCol : sellCol, text_size = size.small)

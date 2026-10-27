@@ -61,6 +61,32 @@ se estima y las barras salen más transparentes.
 3. Si el precio **cierra por encima de la línea** → **COMPRA**. Si cae bajo el stop o pasan 3 velas, se cancela.
 4. Lo mismo al revés para **VENTA** (rebote débil en bajada).
 
+## Lectura avanzada (para más precisión)
+
+| Elemento | Qué significa | Por qué mejora la lectura |
+|---|---|---|
+| **Barras apagadas** (transparentes) | Vela con poco volumen (< 0,7× la media) | Quién mandó en una vela sin volumen importa poco: no le des peso. |
+| **Borde grueso** | Volumen alto (≥ 1,5× la media) | Ahí hubo "esfuerzo" de verdad: esa vela cuenta. |
+| **⚡ Absorción** | Divergencia + volumen alto: muchos vendedores y aun así cierra arriba (o al revés) | Alguien grande absorbió con órdenes límite. Suele marcar giros. |
+| **Nota A+ / A / B / C** | Calidad del retroceso (pasa el ratón para ver el detalle) | Solo se da señal desde la nota mínima (por defecto B = 3/5). |
+| **Línea verde discontinua** | Objetivo (2R por defecto) tras una COMPRA/VENTA | Gestión clara de la salida. |
+| **Panel: Señales y Resultado** | Cuántas señales dio en el histórico visible, % de aciertos y R total | Te dice si el indicador funciona en ESA moneda y temporalidad antes de arriesgar. |
+
+La nota suma 1 punto por cada condición:
+
+1. Tendencia a favor (EMA de las velas dibujadas, con pendiente a favor).
+2. En ≥ 75 % de las velas del retroceso mandó el bando de la tendencia.
+3. Delta total del retroceso a favor de la tendencia (compras − ventas ≥ 0 en un retroceso alcista).
+4. Retroceso con poco volumen (los que van en contra no tienen fuerza).
+5. Vela de giro con volumen ≥ media y dominio claro (≥ 60 %).
+
+**Cómo usar la estadística:** con objetivo 2R necesitas acertar más del 34 % para ganar dinero
+(el % sale en verde cuando lo supera). Si en una moneda/temporalidad el "Resultado total" es negativo,
+no la operes con este método o sube la nota mínima a 4.
+
+> Con plan **Premium/Ultimate** de TradingView existe `request.footprint()`, que da compras y ventas
+> reales tick a tick. Si tienes ese plan, pídelo y se puede añadir como fuente de datos.
+
 ## Ajustes
 
 | Parámetro | Por defecto | Para qué |
@@ -68,7 +94,10 @@ se estima y las barras salen más transparentes.
 | Altura de las barras | Comparar | La barra ganadora llena la vela y la otra su proporción. "% del cuerpo" = cada barra mide su %. |
 | Divergencia si el bando contrario ≥ % | 60 | Sube a 65–70 en monedas pequeñas si ves demasiado amarillo. |
 | Velas mínimas del retroceso | 2 | 3 para menos señales y más limpias. |
-| Filtrar con EMA | Sí (20 velas dibujadas) | Solo compras en subida y ventas en bajada. |
+| Exigir tendencia a favor (EMA) | Sí (20 velas dibujadas) | Solo compras en subida y ventas en bajada. |
+| Nota mínima para dar señal | 3 (B) | 4 (A) para menos señales y más fiables. |
+| Objetivo (R) | 2 | 1,5 en mercados laterales; 3 en tendencias fuertes. |
+| Volumen bajo / alto | 0,7× / 1,5× | Ajusta según lo "nerviosa" que sea la moneda. |
 | Mostrar % de compradores | No | Número exacto bajo cada vela. |
 
 ## Alertas
