@@ -21,6 +21,7 @@ buyCol      = input.color(#26D07C, "Compradores (dentro)", group = grpVis)
 sellCol     = input.color(#FF5C6C, "Vendedores (dentro)", group = grpVis)
 showDiv     = input.bool(true, "Resaltar divergencias en amarillo", group = grpVis, tooltip = "Vela roja con más compradores dentro, o vela verde con más vendedores dentro.")
 divCol      = input.color(#FFC107, "Color divergencia", group = grpVis)
+divThr      = input.int(60, "Divergencia si el bando contrario ≥ %", 50, 100, group = grpVis, tooltip = "Con 50 casi cualquier vela sale amarilla. 60 = solo cuando el bando contrario ganó con claridad. Sube a 65–70 en monedas pequeñas o muy volátiles.")
 fillMode    = input.string("Color dominante", "Modo de relleno", options = ["Color dominante", "Apilado"], group = grpVis, tooltip = "Color dominante: toda la vela del color del bando que ganó; más intenso cuanto mayor la ventaja (ideal con zoom alejado).\nApilado: verde abajo = % compradores, rojo arriba = % vendedores (como el vídeo; mejor con zoom cercano).")
 innerTransp = input.int(15, "Transparencia del relleno", 0, 90, group = grpVis)
 showPct     = input.bool(false, "Mostrar % de compra bajo cada vela", group = grpVis)
@@ -85,7 +86,7 @@ bodyTop   = math.max(open, close)
 bodyBot   = math.min(open, close)
 split     = bodyBot + (bodyTop - bodyBot) * buyPct
 isUp      = close >= open
-divergent = (close < open and buyPct > 0.5) or (close > open and buyPct < 0.5)
+divergent = (close < open and buyPct * 100 >= divThr) or (close > open and (1 - buyPct) * 100 >= divThr)
 outline   = showDiv and divergent ? divCol : isUp ? upOutline : dnOutline
 fillTr    = estim ? math.min(innerTransp + 45, 95) : innerTransp
 noCol     = color.new(color.black, 100)

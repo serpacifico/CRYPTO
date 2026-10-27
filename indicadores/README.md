@@ -91,6 +91,7 @@ El panel (arriba a la derecha) muestra para la vela actual: temporalidad interna
 | % velas con dominio contrario | 50 | 60–70 para menos señales pero más limpias. |
 | Filtrar con EMA | Sí (50) | Desactívalo solo si sabes leer la tendencia tú mismo. |
 | Velas máximas para romper | 10 | Menos si quieres solo rupturas rápidas. |
+| Divergencia si el bando contrario ≥ % | 60 | 65–70 en monedas pequeñas/volátiles si ves demasiado amarillo. |
 | Mostrar % bajo cada vela | No | Actívalo para ver el número exacto de compradores. |
 
 ## Alertas
