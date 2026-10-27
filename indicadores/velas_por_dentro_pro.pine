@@ -1,0 +1,213 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// Velas por Dentro PRO
+// Dibuja las velas de una temporalidad superior (HTF) como "cajas" que envuelven
+// las velas del gráfico actual, para ver qué pasa DENTRO de cada vela grande.
+// Mejoras: TF automático, mechas y 50% HTF, presión compradora/vendedora interna,
+// detección de retrocesos débiles a favor de tendencia, nivel de entrada/stop y alertas.
+
+//@version=6
+indicator("Velas por Dentro PRO", shorttitle = "VxD PRO", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+// ───────────────────────────── Entradas ─────────────────────────────
+grpTF    = "Temporalidad superior"
+tfMode   = input.string("Auto", "Modo", options = ["Auto", "Manual"], group = grpTF, tooltip = "Auto: 1m→5m, 3m/5m→15m, 15m→1H, 30m→2H, 1H→4H, 2H/4H→D, D→W, W→M")
+tfManual = input.timeframe("60", "TF superior (modo Manual)", group = grpTF)
+
+grpVis     = "Visual"
+bullCol    = input.color(#4FC3F7, "Vela HTF alcista", group = grpVis)
+bearCol    = input.color(#EF5350, "Vela HTF bajista", group = grpVis)
+fillTransp = input.int(92, "Transparencia del relleno", 0, 100, group = grpVis)
+borderW    = input.int(1, "Grosor del borde", 1, 4, group = grpVis)
+showWicks  = input.bool(true, "Mostrar mechas HTF", group = grpVis)
+showMid    = input.bool(true, "Mostrar 50% de la vela HTF", group = grpVis)
+showPct    = input.bool(false, "Etiqueta % de compra en cada vela HTF", group = grpVis)
+showTable  = input.bool(true, "Mostrar panel", group = grpVis)
+
+grpSig     = "Retrocesos y señales"
+showSig    = input.bool(true, "Detectar retrocesos débiles", group = grpSig)
+emaLen     = input.int(20, "EMA de tendencia (calculada en el TF superior)", 2, group = grpSig)
+weakThr    = input.int(45, "Retroceso débil si la presión a favor ≥ %", 0, 100, group = grpSig, tooltip = "En una vela HTF roja dentro de tendencia alcista: si la presión compradora interna es ≥ este %, los vendedores no tienen fuerza (retroceso débil).")
+expiry     = input.int(2, "Velas HTF para confirmar la ruptura", 1, 10, group = grpSig)
+showLevels = input.bool(true, "Dibujar nivel de entrada y stop", group = grpSig)
+
+// ───────────────────────────── Temporalidad ─────────────────────────────
+autoTF() =>
+    s = timeframe.in_seconds()
+    s <= 60 ? "5" : s <= 300 ? "15" : s <= 900 ? "60" : s <= 1800 ? "120" : s <= 3600 ? "240" : s <= 14400 ? "D" : s <= 86400 ? "W" : "M"
+
+tfLabel(tf) =>
+    s = timeframe.in_seconds(tf)
+    s < 3600 ? str.tostring(s / 60, "#") + "m" : s < 86400 ? str.tostring(s / 3600, "#") + "H" : tf
+
+htf = tfMode == "Auto" ? autoTF() : tfManual
+if timeframe.in_seconds(htf) <= timeframe.in_seconds()
+    runtime.error("El TF superior debe ser mayor que el del gráfico. Cambia el modo o el TF manual.")
+
+// Tendencia en el TF superior sin repintado (solo velas HTF cerradas)
+htfData() =>
+    e = ta.ema(close, emaLen)
+    [close[1], e[1], e[2], close[2], e[3]]
+[c1, e1, e2, c2, e3] = request.security(syminfo.tickerid, htf, htfData(), lookahead = barmerge.lookahead_on)
+
+// ───────────────────────────── Estado ─────────────────────────────
+var int   sBar  = na
+var float hO    = na
+var float hH    = na
+var float hL    = na
+var float hC    = na
+var float buyV  = 0.0
+var float sellV = 0.0
+var int   nBars = 0
+var box   bx    = na
+var line  wU    = na
+var line  wD    = na
+var line  mL    = na
+
+var int   pDir   = 0   // 1 = setup largo pendiente, -1 = corto
+var float pTrig  = na
+var float pStop  = na
+var int   pLeft  = 0
+var line  trigLn = na
+var line  stopLn = na
+
+isNew    = timeframe.change(htf) or na(sBar)
+weakBull = false
+weakBear = false
+
+// ── Cierre de la vela HTF anterior: análisis interno ──
+if isNew and not na(sBar)
+    tot    = buyV + sellV
+    buyPct = tot > 0 ? buyV / tot * 100 : 50.0
+    prevX  = int((sBar + bar_index - 1) / 2)
+
+    if pDir != 0
+        pLeft -= 1
+        if pLeft <= 0
+            pDir := 0
+
+    if showSig
+        upTrend = c2 > e2 and e2 > e3
+        dnTrend = c2 < e2 and e2 < e3
+        if upTrend and hC < hO and buyPct >= weakThr
+            weakBull := true
+            pDir     := 1
+            pTrig    := hH
+            pStop    := hL
+            pLeft    := expiry
+            label.new(prevX, hL, "R▲", style = label.style_label_up, color = color.new(bullCol, 20), textcolor = color.black, size = size.small, tooltip = "Retroceso débil en tendencia alcista\nCompra interna: " + str.tostring(buyPct, "#") + "%\nEntrada si rompe " + str.tostring(hH, format.mintick) + "\nStop: " + str.tostring(hL, format.mintick))
+        else if dnTrend and hC > hO and 100 - buyPct >= weakThr
+            weakBear := true
+            pDir     := -1
+            pTrig    := hL
+            pStop    := hH
+            pLeft    := expiry
+            label.new(prevX, hH, "R▼", style = label.style_label_down, color = color.new(bearCol, 20), textcolor = color.white, size = size.small, tooltip = "Retroceso débil en tendencia bajista\nVenta interna: " + str.tostring(100 - buyPct, "#") + "%\nEntrada si rompe " + str.tostring(hL, format.mintick) + "\nStop: " + str.tostring(hH, format.mintick))
+
+        if (weakBull or weakBear) and showLevels
+            trigLn := line.new(bar_index, pTrig, bar_index + 1, pTrig, color = color.new(color.yellow, 0), style = line.style_dashed, width = 1)
+            stopLn := line.new(bar_index, pStop, bar_index + 1, pStop, color = color.new(color.gray, 0), style = line.style_dotted, width = 1)
+
+    if showPct
+        label.new(prevX, hH, str.tostring(buyPct, "#") + "% C", style = label.style_none, textcolor = buyPct >= 50 ? bullCol : bearCol, size = size.tiny)
+
+// ── Nueva vela HTF: reiniciar ──
+if isNew
+    sBar  := bar_index
+    hO    := open
+    hH    := high
+    hL    := low
+    buyV  := 0.0
+    sellV := 0.0
+    nBars := 0
+else
+    hH := math.max(hH, high)
+    hL := math.min(hL, low)
+hC    := close
+nBars += 1
+
+// Presión interna: reparte el volumen según dónde cierra cada vela en su rango
+v    = na(volume) or volume == 0 ? 1.0 : volume
+rng  = high - low
+frac = rng > 0 ? (close - low) / rng : 0.5
+buyV  += v * frac
+sellV += v * (1 - frac)
+
+// ── Dibujo de la vela HTF actual ──
+top  = math.max(hO, hC)
+bot  = math.min(hO, hC)
+col  = hC >= hO ? bullCol : bearCol
+midX = int((sBar + bar_index) / 2)
+mid  = (hH + hL) / 2
+
+if isNew
+    bx := box.new(sBar, top, bar_index, bot, border_color = col, border_width = borderW, bgcolor = color.new(col, fillTransp))
+    if showWicks
+        wU := line.new(midX, hH, midX, top, color = col, width = borderW)
+        wD := line.new(midX, bot, midX, hL, color = col, width = borderW)
+    if showMid
+        mL := line.new(sBar, mid, bar_index, mid, color = color.new(col, 40), style = line.style_dotted, width = 1)
+else
+    box.set_right(bx, bar_index)
+    box.set_top(bx, top)
+    box.set_bottom(bx, bot)
+    box.set_border_color(bx, col)
+    box.set_bgcolor(bx, color.new(col, fillTransp))
+    if showWicks
+        line.set_xy1(wU, midX, hH)
+        line.set_xy2(wU, midX, top)
+        line.set_xy1(wD, midX, bot)
+        line.set_xy2(wD, midX, hL)
+        line.set_color(wU, col)
+        line.set_color(wD, col)
+    if showMid
+        line.set_x2(mL, bar_index)
+        line.set_y1(mL, mid)
+        line.set_y2(mL, mid)
+        line.set_color(mL, color.new(col, 40))
+
+// ── Confirmación: ruptura del extremo del retroceso ──
+longSig  = false
+shortSig = false
+if pDir == 1 and barstate.isconfirmed
+    if close < pStop
+        pDir := 0
+    else if close > pTrig
+        longSig := true
+        pDir    := 0
+else if pDir == -1 and barstate.isconfirmed
+    if close > pStop
+        pDir := 0
+    else if close < pTrig
+        shortSig := true
+        pDir     := 0
+
+if showLevels and pDir != 0
+    line.set_x2(trigLn, bar_index)
+    line.set_x2(stopLn, bar_index)
+
+plotshape(longSig, "Entrada larga", shape.triangleup, location.belowbar, color.new(bullCol, 0), size = size.small, text = "COMPRA", textcolor = bullCol)
+plotshape(shortSig, "Entrada corta", shape.triangledown, location.abovebar, color.new(bearCol, 0), size = size.small, text = "VENTA", textcolor = bearCol)
+
+alertcondition(weakBull, "Retroceso débil alcista", "VxD: retroceso débil en tendencia alcista. Vigila la ruptura del máximo.")
+alertcondition(weakBear, "Retroceso débil bajista", "VxD: retroceso débil en tendencia bajista. Vigila la ruptura del mínimo.")
+alertcondition(longSig, "Entrada larga confirmada", "VxD: ruptura alcista tras retroceso débil.")
+alertcondition(shortSig, "Entrada corta confirmada", "VxD: ruptura bajista tras retroceso débil.")
+
+// ───────────────────────────── Panel ─────────────────────────────
+var table tb = table.new(position.top_right, 2, 5, bgcolor = color.new(#0B1220, 10), border_color = color.new(color.gray, 70), border_width = 1)
+if showTable and barstate.islast
+    tot    = buyV + sellV
+    buyNow = tot > 0 ? buyV / tot * 100 : 50.0
+    trend  = c1 > e1 and e1 > e2 ? "Alcista" : c1 < e1 and e1 < e2 ? "Bajista" : "Lateral"
+    tCol   = trend == "Alcista" ? bullCol : trend == "Bajista" ? bearCol : color.gray
+    setup  = pDir == 1 ? "Largo > " + str.tostring(pTrig, format.mintick) : pDir == -1 ? "Corto < " + str.tostring(pTrig, format.mintick) : "—"
+    table.cell(tb, 0, 0, "TF superior", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 0, tfLabel(htf), text_color = color.white, text_size = size.small)
+    table.cell(tb, 0, 1, "Velas dentro", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 1, str.tostring(nBars), text_color = color.white, text_size = size.small)
+    table.cell(tb, 0, 2, "Compra / Venta", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 2, str.tostring(buyNow, "#") + "% / " + str.tostring(100 - buyNow, "#") + "%", text_color = buyNow >= 50 ? bullCol : bearCol, text_size = size.small)
+    table.cell(tb, 0, 3, "Tendencia HTF", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 3, trend, text_color = tCol, text_size = size.small)
+    table.cell(tb, 0, 4, "Setup", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 4, setup, text_color = color.yellow, text_size = size.small)
